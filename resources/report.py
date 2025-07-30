@@ -1,65 +1,116 @@
-from flask_restful import Resource, reqparse
-from models import db, Location
+from flask_restful import Resource,reqparse
+from models import db, Report
+from flask import request
+#from flask_jwt_extended import jwt_required
 from sqlalchemy.exc import SQLAlchemyError
 
-class LocationResource(Resource):
+class ReportResource(Resource):
     parser = reqparse.RequestParser()
-    parser.add_argument('latitude', type=float, required=True, help='Latitude is required')
-    parser.add_argument('longitude', type=float, required=True, help='Longitude is required')
-    parser.add_argument('address', type=str, help='Address is optional')
-    parser.add_argument('report_id', type=int, required=True, help='Report ID is required')
+    parser.add_argument('incident', type=str, required=True, help='incident type is required')
+    parser.add_argument('details', type=str, help='Please provide a detailed message')
+    # parser.add_argument('Location',required=True,  type=float, help='Location not provided')
 
-    def get(self, location_id=None):
-        if location_id:
-            location = Location.query.get(location_id)
-            if location:
-                return location.to_dict()
-            return {"message": "Location not found"}, 404
+    # parser.add_argument('Media', type=str, help='Media not attached')
 
-        locations = Location.query.all()
-        return [loc.to_dict() for loc in locations]
+    def get(self, id=None):
+        if id:
+            report = Report.query.get(id=id)
+
+            if report:
+                return report.to_dict()
+            
+        reports = Report.query.all()
+        return [r.to_dict() for r in reports]
 
     def post(self):
-        data = LocationResource.parser.parse_args()
+
+        data = request.get_json()
+        args = self.parser.parse_args()
+
 
         try:
-            location = Location(**data)
-            db.session.add(location)
+            report = Report(
+              user_id =data["user_id"],
+              incident=args['incident'],   
+
+              details=args.get('details') ,
+              latitude=data["latitude"]  ,
+              longitude =data["longitude"]
+            )
+            db.session.add(report)
             db.session.commit()
-            return location.to_dict(), 201
+            return report.to_dict(), 201
         except Exception as e:
-            return {'message': str(e)}, 400
-        except SQLAlchemyError:
             db.session.rollback()
-            return {'message': 'Database error'}, 500
+            return {'message': str(e)}, 400
+        # except SQLAlchemyError:
+        #     db.session.rollback()
+        #     return {'message':'Database error'}, 500
 
-    def patch(self, location_id):
-        location = Location.query.get(location_id)
-        if not location:
-            return {"message": "Location not found"}, 404
+    
+    def patch(self, id=None):
+        report = Report.query.get(id=id)
+        if not report:
+            return {"message": "Report not found"}, 404
+        
+        data = request.get_json()
+        if 'user_id' in data:
+            report.user_id =data['user_id']
+        if 'details' in data:
+            report.details = data['details']  
+        if 'incident'   in data:
+            report.incident =data['incident']
 
-        data = LocationResource.parser.parse_args()
-        for key, value in data.items():
-            setattr(location, key, value)
+        if 'latitude'   in data:
+            report.latitude =data['latitude']
+        if 'longitude'   in data:
+            report.longitude =data['longitude']
+
 
         try:
             db.session.commit()
-            return location.to_dict()
+            return report.to_dict()
         except Exception as e:
             return {"message": str(e)}, 400
         except SQLAlchemyError:
             db.session.rollback()
             return {"message": "Database error"}, 500
 
-    def delete(self, location_id):
-        location = Location.query.get(location_id)
-        if not location:
-            return {"message": "Location not found"}, 404
-
+    def delete(self, id=None):
+        report = Report.query.get(id=id)
+        if not report:
+            return {"message": "Report not found"}, 404
+        
         try:
-            db.session.delete(location)
+            db.session.delete(report)
             db.session.commit()
-            return {"message": "Location deleted"}
+            return {"message": "Report deleted"}
         except SQLAlchemyError:
             db.session.rollback()
             return {"message": "Database error"}, 500
+
+
+        
+class MediaResource(Resource):
+    def get(self, id=None):
+        report = Report.query.get(id=id)
+        if report:
+            media = report.media_attachment
+            return [m.to_dict() for m in media], 200
+        else:
+            return {'message':'Media not found'}, 403
+        
+    def delete(self, id = None):
+        report = Report.query.get(id=id)
+        if report:
+            media = [m.to_dict() for m in report.media_attachment]
+            try:
+                db.session.delete(media)
+                db.session.commit()
+                return {'message':'Media deleted successfully'}, 200
+            except SQLAlchemyError:
+                db.session.rollback()
+                return {'message':'Database error: Media not deleted'}, 500
+
+
+
