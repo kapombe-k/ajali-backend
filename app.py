@@ -21,7 +21,7 @@ app = Flask(__name__)
 
 # configuring our flask app through the config object
 #DATABASE_URL = os.environ["DATABASE_URL"]
-app.config["SQLALCHEMY_DATABASE_URI"] = 'postgresql://postgres.odxdmntfytakjbgallmx:RcwW6irONwYZzFiO@aws-0-eu-north-1.pooler.supabase.com:6543/postgres'
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get('DATABASE_URL').replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_ECHO"] = True
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False  # optional but recommended
 # access token
