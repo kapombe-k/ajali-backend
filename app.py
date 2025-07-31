@@ -20,7 +20,8 @@ load_dotenv()
 app = Flask(__name__)
 
 # configuring our flask app through the config object
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ["DATABASE_URL"]
+app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_ECHO"] = True
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False  # optional but recommended
 # access token
