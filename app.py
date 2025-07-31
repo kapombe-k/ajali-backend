@@ -20,7 +20,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # configuring our flask app through the config object
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///ajali.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_ECHO"] = True
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False  # optional but recommended
 # access token
@@ -51,4 +51,4 @@ api.add_resource(ReportStatusUpdateResource, '/admin/reports/<int:report_id>/sta
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
