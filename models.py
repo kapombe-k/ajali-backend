@@ -32,36 +32,32 @@ class User(db.Model, SerializerMixin):
     created_at = db.Column(db.TIMESTAMP)
     
     role = db.Column(db.String, default="user") 
-    @property
-    def is_admin(self):
-        return self.role == "admin"
 
     reports = db.relationship("Report", back_populates="user", cascade="all, delete")
 
     emergency_contacts = db.relationship( "EmergencyContact", back_populates="user", cascade="all, delete" )
     # status_updates = db.relationship('StatusUpdates', back_populates='admin', cascade='all, delete')
+    @property
+    def is_admin(self):
+        return self.role == "admin"
 
 
 class Report(db.Model, SerializerMixin):
     __tablename__ = "reports"
-    serialize_rules = ("-user", "-status_updates", "-media_attachments", "-location")
+    serialize_rules = ("-user.reports", "-status_updates.report", "-media_attachments.report")
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     incident = db.Column(db.String, nullable=False)
     details = db.Column(db.Text, nullable=False)
-
     latitude = db.Column(db.Float, nullable=False, server_default="0")
     longitude = db.Column(db.Float, nullable=False, server_default="0")
+    created_at = db.Column(db.DateTime, server_default=db.func.now())  # Add timestamp
 
-    created_at = db.Column(db.TIMESTAMP)
-
+    # Relationships
     user = db.relationship("User", back_populates="reports")
-
-    location = db.relationship( "Location", back_populates="report", uselist=False, cascade="all, delete" )
-    media_attachments = db.relationship(  "MediaAttachment", back_populates="report", cascade="all, delete" )
-  
-    status_updates = db.relationship('StatusUpdate', back_populates='report', cascade='all, delete')
+    media_attachments = db.relationship("MediaAttachment", back_populates="report", cascade="all, delete-orphan")
+    status_updates = db.relationship("StatusUpdate", back_populates="report", cascade="all, delete-orphan")
 
 
 class EmergencyContact(db.Model, SerializerMixin):
@@ -81,13 +77,16 @@ class EmergencyContact(db.Model, SerializerMixin):
 
 class MediaAttachment(db.Model, SerializerMixin):
     __tablename__ = "media_attachments"
+    serialize_rules = ("-report",)  # Avoid circular serialization
 
     id = db.Column(db.Integer, primary_key=True)
-    file_url = db.Column(db.String, nullable=False)
-    media_type = db.Column(db.String, nullable=False)
-    uploaded_at = db.Column(db.TIMESTAMP)
-
+    file_key = db.Column(db.String, nullable=False)  # Supabase storage path (e.g., "reports/media/uuid.jpg")
+    media_type = db.Column(db.String, nullable=False)  # "image/jpeg", "video/mp4"
+    public_url = db.Column(db.String)  # Generated Supabase URL (optional)
     report_id = db.Column(db.Integer, db.ForeignKey("reports.id"), nullable=False)
+    uploaded_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    # Relationships
     report = db.relationship("Report", back_populates="media_attachments")
 
 

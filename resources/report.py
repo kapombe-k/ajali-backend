@@ -1,116 +1,107 @@
-from flask_restful import Resource,reqparse
-from models import db, Report
-from flask import request
-#from flask_jwt_extended import jwt_required
-from sqlalchemy.exc import SQLAlchemyError
+from flask_restful import Resource
+from flask import request, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from models import db, Report, MediaAttachment
+from datetime import datetime, timezone
+from supabase import create_client
+import os
+
+# Initialize Supabase
+supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 class ReportResource(Resource):
-    parser = reqparse.RequestParser()
-    parser.add_argument('incident', type=str, required=True, help='incident type is required')
-    parser.add_argument('details', type=str, help='Please provide a detailed message')
-    # parser.add_argument('Location',required=True,  type=float, help='Location not provided')
-
-    # parser.add_argument('Media', type=str, help='Media not attached')
-
-    def get(self, id=None):
-        if id:
-            report = Report.query.get(id=id)
-
-            if report:
-                return report.to_dict()
+    @jwt_required()
+    def get(self, report_id=None):
+        current_user = get_jwt_identity()
+        
+        # Single report
+        if report_id:
+            report = Report.query.get_or_404(report_id)
+            if report.user_id != current_user["id"] and current_user.get("role") != "admin":
+                return {"message": "Unauthorized"}, 403
+            return self._serialize_report(report)
+        
+        # All reports (admin gets all, users get their own)
+        query = Report.query
+        if current_user.get("role") != "admin":
+            query = query.filter_by(user_id=current_user["id"])
             
-        reports = Report.query.all()
-        return [r.to_dict() for r in reports]
+        return [self._serialize_report(r) for r in query.all()], 200
 
+    @jwt_required()
     def post(self):
-
-        data = request.get_json()
-        args = self.parser.parse_args()
-
-
         try:
-            report = Report(
-              user_id =data["user_id"],
-              incident=args['incident'],   
+            data = request.get_json()
+            user_id = get_jwt_identity()["id"]
+            
+            # Validate
+            required_fields = ["incident", "details", "latitude", "longitude"]
+            if not all(field in data for field in required_fields):
+                return {"message": f"Missing fields: {required_fields}"}, 400
 
-              details=args.get('details') ,
-              latitude=data["latitude"]  ,
-              longitude =data["longitude"]
+            # Create report
+            report = Report(
+                user_id=user_id,
+                incident=data["incident"],
+                details=data["details"],
+                latitude=data["latitude"],
+                longitude=data["longitude"],
             )
             db.session.add(report)
             db.session.commit()
-            return report.to_dict(), 201
+            
+            return self._serialize_report(report), 201
+
         except Exception as e:
             db.session.rollback()
-            return {'message': str(e)}, 400
-        # except SQLAlchemyError:
-        #     db.session.rollback()
-        #     return {'message':'Database error'}, 500
+            current_app.logger.error(f"Report creation failed: {str(e)}")
+            return {"message": "Report creation failed"}, 500
 
-    
-    def patch(self, id=None):
-        report = Report.query.get(id=id)
-        if not report:
-            return {"message": "Report not found"}, 404
+    @jwt_required()
+    def delete(self, report_id):
+        report = Report.query.get_or_404(report_id)
+        current_user = get_jwt_identity()
         
-        data = request.get_json()
-        if 'user_id' in data:
-            report.user_id =data['user_id']
-        if 'details' in data:
-            report.details = data['details']  
-        if 'incident'   in data:
-            report.incident =data['incident']
-
-        if 'latitude'   in data:
-            report.latitude =data['latitude']
-        if 'longitude'   in data:
-            report.longitude =data['longitude']
-
+        # Authorization
+        if report.user_id != current_user["id"] and current_user.get("role") != "admin":
+            return {"message": "Unauthorized"}, 403
 
         try:
-            db.session.commit()
-            return report.to_dict()
-        except Exception as e:
-            return {"message": str(e)}, 400
-        except SQLAlchemyError:
-            db.session.rollback()
-            return {"message": "Database error"}, 500
-
-    def delete(self, id=None):
-        report = Report.query.get(id=id)
-        if not report:
-            return {"message": "Report not found"}, 404
-        
-        try:
+            # Delete associated media from Supabase
+            for media in report.media_attachments:
+                supabase.storage.from_("report-media").remove([media.file_key])
+            
             db.session.delete(report)
             db.session.commit()
-            return {"message": "Report deleted"}
-        except SQLAlchemyError:
+            return {"message": "Report deleted"}, 200
+            
+        except Exception as e:
             db.session.rollback()
-            return {"message": "Database error"}, 500
+            current_app.logger.error(f"Deletion failed: {str(e)}")
+            return {"message": "Deletion failed"}, 500
 
+    def _serialize_report(self, report):
+        return {
+            "id": report.id,
+            "title": report.incident,  # Frontend expects 'title'
+            "description": report.details,
+            "status": report.status or "pending",
+            "created_at": report.created_at.isoformat(),
+            "updated_at": report.updated_at.isoformat() if report.updated_at else None,
+            "latitude": report.latitude,
+            "longitude": report.longitude,
+            "media_urls": [
+                supabase.storage.from_("report-media").get_public_url(m.file_key)
+                for m in report.media_attachments
+            ]
+        }
 
-        
-class MediaResource(Resource):
-    def get(self, id=None):
-        report = Report.query.get(id=id)
-        if report:
-            media = report.media_attachment
-            return [m.to_dict() for m in media], 200
-        else:
-            return {'message':'Media not found'}, 403
-        
-    def delete(self, id = None):
-        report = Report.query.get(id=id)
-        if report:
-            media = [m.to_dict() for m in report.media_attachment]
-            try:
-                db.session.delete(media)
-                db.session.commit()
-                return {'message':'Media deleted successfully'}, 200
-            except SQLAlchemyError:
-                db.session.rollback()
-                return {'message':'Database error: Media not deleted'}, 500
-
-
-
+class UserReportsResource(Resource):
+    @jwt_required()
+    def get(self, user_id):
+        current_user = get_jwt_identity()
+        if user_id != current_user["id"] and current_user.get("role") != "admin":
+            return {"message": "Unauthorized"}, 403
+            
+        reports = Report.query.filter_by(user_id=user_id).all()
+        return [ReportResource()._serialize_report(r) for r in reports], 200
