@@ -1,7 +1,7 @@
 from flask_restful import Resource
 from flask import request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import db, Report, MediaAttachment
+from models import db, Report
 from datetime import datetime, timezone
 from supabase import create_client
 import os

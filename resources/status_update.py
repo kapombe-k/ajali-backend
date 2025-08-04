@@ -1,53 +1,59 @@
-
 from flask_restful import Resource
-from flask import request
-from datetime import datetime
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import db, Report, StatusUpdate, User 
+from flask import request, current_app
+from datetime import datetime, timezone
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
+from models import db, Report, StatusUpdate
 
 class ReportStatusUpdateResource(Resource):
-
     @jwt_required()
     def post(self, report_id):
-        # Get current user identity from JWT token
-        current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
-
-        # Check if user exists and is admin
-        if not user or not user.is_admin:
-            return {"error": "Admin access required"}, 403
-
-        # Parse request data
-        data = request.get_json()
-        new_status = data.get('status')
-        updated_by = data.get('updated_by')
-
-        # Validate status
-        if new_status not in ['under investigation', 'rejected', 'resolved']:
-            return {"error": "Invalid status"}, 400
-
-        # Admin username must be provided - you can decide if you want to fetch it from the user instead
-        if not updated_by:
-            return {"error": "updated_by is required"}, 400
-
-        # Validate report exists
-        report = Report.query.get(report_id)
-        if not report:
-            return {"error": "Report not found"}, 404
-
         try:
-            # Create new StatusUpdate with the given data
+            # Authorization
+            claims = get_jwt()
+            if not claims.get("is_admin"):
+                return {"message": "Admin access required"}, 403
+
+            # Validate input
+            data = request.get_json()
+            new_status = data.get("status")
+            if not new_status:
+                return {"message": "Status is required"}, 400
+            
+            if new_status not in Report.VALID_STATUSES:
+                return {
+                    "message": f"Invalid status. Valid options: {Report.VALID_STATUSES}"
+                }, 400
+
+            # Get report
+            report = Report.query.get(report_id)
+            if not report:
+                return {"message": "Report not found"}, 404
+
+            # Create status update
             status_update = StatusUpdate(
-                report_id=report_id,
-                updated_by=updated_by,
+                report_id=report.id,
+                updated_by=claims["username"],  # From JWT
                 status=new_status,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
+            
+            # Sync report status
+            report.status = new_status
+            report.updated_at = datetime.now(timezone.utc)
+
             db.session.add(status_update)
             db.session.commit()
-            return {"message": f"Report status updated to '{new_status}'"}, 200
+
+            return {
+                "message": "Status updated successfully",
+                "data": {
+                    "report_id": report.id,
+                    "new_status": new_status,
+                    "timestamp": status_update.timestamp.isoformat()
+                }
+            }, 200
 
         except Exception as e:
-            return {"error": str(e)}, 400
-
-
+            db.session.rollback()
+            current_app.logger.exception("Status update failed")
+            return {"message": "Internal server error"}, 500
